@@ -90,11 +90,11 @@ class SpacedDiffusion(GaussianDiffusion):
         self, model, *args, **kwargs
     ):  # pylint: disable=signature-differs
         return super().p_mean_variance(self._wrap_model(model), *args, **kwargs)
-
+    ###change it to adapt the change 
     def training_losses(
-        self, model, *args, **kwargs
+        self, model, *args, model_kwargs=None,**kwargs
     ):  # pylint: disable=signature-differs
-        return super().training_losses(self._wrap_model(model), *args, **kwargs)
+        return super().training_losses(self._wrap_model(model), *args, model_kwargs=model_kwargs, **kwargs)
 
     def condition_mean(self, cond_fn, *args, **kwargs):
         return super().condition_mean(self._wrap_model(cond_fn), *args, **kwargs)

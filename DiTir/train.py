@@ -209,7 +209,7 @@ def main(args):
             t = torch.randint(0, diffusion.num_timesteps, (x_latent.shape[0],), device=device)
             #model_kwargs = dict(y=y)cond_
             #待修改，对齐接口
-            loss_dict = diffusion.training_losses(model, x_latent, t, model_kwargs=dict(x_cond=x_cond_latent))
+            loss_dict = diffusion.training_losses(model, x_latent, t,model_kwargs={'x_cond': x_cond_latent})
             #loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
             loss = loss_dict["loss"].mean()
             opt.zero_grad()
