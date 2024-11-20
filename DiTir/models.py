@@ -63,7 +63,35 @@ class TimestepEmbedder(nn.Module):
         t_emb = self.mlp(t_freq)
         return t_emb
 
+#################################################################################
+#                      Condition Embedding for Degraded Image                   #
+#################################################################################
+#add this class to the model.py file
+class ConditionEmbedder(nn.Module):
+    """
+    Embeds the degraded (input) image into vector representations.
+    """
+    def __init__(self, input_size, patch_size, in_channels, hidden_size):
+        super().__init__()
+        self.patch_embed = PatchEmbed(
+            img_size=input_size,
+            patch_size=patch_size,
+            in_chans=in_channels,
+            embed_dim=hidden_size,
+        )
+        num_patches = self.patch_embed.num_patches
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
+        # Initialize positional embedding
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(num_patches ** 0.5))
+        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
+    def forward(self, x):
+        x = self.patch_embed(x) + self.pos_embed  # (N, T, D)
+        # Optionally, you can add more layers to process the embedded condition
+        # For simplicity, we'll just average the embeddings to get a single vector
+        x = x.mean(dim=1)  # (N, D)
+        return x
+'''
 class LabelEmbedder(nn.Module):
     """
     Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance.
@@ -93,7 +121,7 @@ class LabelEmbedder(nn.Module):
         embeddings = self.embedding_table(labels)
         return embeddings
 
-
+'''
 #################################################################################
 #                                 Core DiT Model                                #
 #################################################################################
@@ -150,14 +178,15 @@ class DiT(nn.Module):
         self,
         input_size=32,
         patch_size=2,
-        in_channels=4,
+        in_channels=3,
         hidden_size=1152,
         depth=28,
         num_heads=16,
         mlp_ratio=4.0,
-        class_dropout_prob=0.1,
-        num_classes=1000,
-        learn_sigma=True,
+        #class_dropout_prob=0.1,
+        #num_classes=1000,
+        #learn_sigma=True,
+        learn_sigma=False,
     ):
         super().__init__()
         self.learn_sigma = learn_sigma
@@ -168,7 +197,8 @@ class DiT(nn.Module):
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
-        self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
+        #self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
+        self.c_embedder = ConditionEmbedder(input_size, patch_size, in_channels, hidden_size)
         num_patches = self.x_embedder.num_patches
         # Will use fixed sin-cos embedding:
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
@@ -198,7 +228,7 @@ class DiT(nn.Module):
         nn.init.constant_(self.x_embedder.proj.bias, 0)
 
         # Initialize label embedding table:
-        nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
+        #nn.init.normal_(self.y_embedder.embedding_table.weight, std=0.02)
 
         # Initialize timestep embedding MLP:
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
@@ -229,7 +259,7 @@ class DiT(nn.Module):
         x = torch.einsum('nhwpqc->nchpwq', x)
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
-    def forward(self, x, t, y):
+    def forward(self, x, t, x_cond):
         """
         Forward pass of DiT.
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
@@ -237,9 +267,9 @@ class DiT(nn.Module):
         y: (N,) tensor of class labels
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
-        t = self.t_embedder(t)                   # (N, D)
-        y = self.y_embedder(y, self.training)    # (N, D)
-        c = t + y                                # (N, D)
+        t_emb = self.t_embedder(t)                   # (N, D)
+        c_emb = self.c_embedder(x_cond)    # (N, D)
+        c = t_emb + c_emb                                # (N, D)
         for block in self.blocks:
             x = block(x, c)                      # (N, T, D)
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
